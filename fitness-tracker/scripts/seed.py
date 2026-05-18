@@ -173,6 +173,53 @@ async def seed():
     await engine.dispose()
     print(f"Seeded {len(users)} users. Demo user ID: {DEMO_USER_ID}")
 
+    # ── Backfill Redis feed ZSETs ──────────────────────────────────────────
+    await _backfill_redis()
+
+
+async def _backfill_redis():
+    """Fan-out existing workouts to Redis feed ZSETs so the feed works immediately."""
+    try:
+        import redis.asyncio as aioredis
+    except ImportError:
+        print("redis package not found — skipping feed backfill")
+        return
+
+    FEED_TTL = 60 * 60 * 24 * 14
+    redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
+
+    engine2 = create_async_engine(settings.database_url)
+    Session2 = async_sessionmaker(engine2, expire_on_commit=False)
+
+    async with Session2() as db:
+        rows = await db.execute(select(Follow))
+        follows = rows.scalars().all()
+
+        for follow in follows:
+            q = (
+                select(Workout)
+                .where(
+                    Workout.user_id == follow.followee_id,
+                    Workout.deleted.is_(False),
+                    Workout.privacy != "private",
+                )
+                .order_by(Workout.started_at.desc())
+                .limit(20)
+            )
+            result = await db.execute(q)
+            workouts = result.scalars().all()
+            pipe = redis_client.pipeline()
+            for w in workouts:
+                score = w.started_at.replace(tzinfo=timezone.utc).timestamp()
+                pipe.zadd(f"feed:{follow.follower_id}", {w.id: score})
+                pipe.expire(f"feed:{follow.follower_id}", FEED_TTL)
+            await pipe.execute()
+
+    n = await redis_client.zcard(f"feed:{DEMO_USER_ID}")
+    print(f"Feed backfill done — demo user feed has {n} items in Redis")
+    await redis_client.aclose()
+    await engine2.dispose()
+
 
 if __name__ == "__main__":
     asyncio.run(seed())
