@@ -38,13 +38,12 @@ services:
       FANOUT_THRESHOLD: "10000"
     volumes:
       - ./data/blobs:/data/blobs
-      - ./backend:/app
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
 
   frontend:
     image: node:20-alpine
