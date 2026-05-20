@@ -8,8 +8,10 @@
 
 export const DEMO_USER_ID = '00000000-0000-0000-0000-000000000001';
 
+const BASE_URL = import.meta.env.VITE_API_URL ?? '';
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(`${BASE_URL}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
